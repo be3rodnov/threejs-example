@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>Трёхмерная модель мусоровоза KATMERCILER</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="initial-scale=1, viewport-fit=cover">
+	<meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">
+	<meta name="theme-color" content="#1E1E1E" media="(prefers-color-scheme: dark)">
+	<script src="https://code.jquery.com/jquery-3.6.0.min.js"
+		integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+	<link rel="stylesheet" href="./style.min.css" type="text/css">
+</head>
+
+<body>
+
+	<section class="three-model">
+		<div class="three-model__canvas-block canvas-block container">
+			<div class="canvas-block__wrap">
+				<div class="canvas-block__content" id="container"></div>
+			</div>
+		</div>
+		<div class="three-model__control control">
+			<div class="container">
+				<div class="control__wrap">
+					<div class="control__list">
+						<div class="control__item part" id="move__1" type="button">Выталкивающая плита</div>
+						<div class="control__item part" id="move__2" type="button">Задний борт</div>
+						<div class="control__item part" id="move__3" type="button">Прессование</div>
+						<div class="control__item part" id="move__4" type="button">Загрузчик</div>
+						<div class="control__item part" id="move__5" type="button">Аутригеры</div>
+						<div class="control__item part" id="move__6" type="button">Портал</div>
+						<!--<div class="control__item full" id="move__full" type="button">Полный цикл</div>-->
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+
+
+
+	<script type="module">
+		import * as THREE from './././build/three.module.js';
+		import { RoughnessMipmapper } from '././jsm/utils/RoughnessMipmapper.js';
+		import { OrbitControls } from '././jsm/controls/OrbitControls.js';
+		import { RoomEnvironment } from '././jsm/environments/RoomEnvironment.js';
+		import { GUI } from '././jsm/libs/dat.gui.module.js';
+		import { GLTFLoader } from '././jsm/loaders/GLTFLoader.js';
+		import { DRACOLoader } from '././jsm/loaders/DRACOLoader.js';
+		import { RGBELoader } from '././jsm/loaders/RGBELoader.js';
+		import { RectAreaLightUniformsLib } from '././jsm/lights/RectAreaLightUniformsLib.js';
+
+
+		var camera, scene, renderer, envMap, background ;
+
+		var grid;
+		var controls;
+
+		var mixer = null;
+		var clock = new THREE.Clock(); // create clock
+		var animations;
+
+		function init() {
+			var container = document.getElementById( 'container' );
+
+			renderer = new THREE.WebGLRenderer({antialias: true}); // сглаживание
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setAnimationLoop( render );
+			renderer.outputEncoding = THREE.sRGBEncoding;
+			renderer.shadowMap.enabled = true;
+			renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+			renderer.toneMapping = THREE.ACESFilmicToneMapping;
+			renderer.toneMappingExposure = 1;
+			renderer.physicallyCorrectLights = true; // реалистичная тень (затемнение темных участков)
+		
+				renderer.setSize( $('#container').width(), $('#container').height() );
+	
+
+			container.appendChild( renderer.domElement );
+			window.addEventListener( 'resize', onWindowResize, false );
+
+			// камера =================================
+			camera = new THREE.PerspectiveCamera( 45, 2.28, 2.25, 50 ); // камера
+			camera.position.set(7, 4, 7); // позиция камеры X Y Z
+			camera.aspect = container.offsetWidth / container.offsetHeight;
+			camera.updateProjectionMatrix();
+
+			// управление =============================
+			controls = new OrbitControls( camera, container );
+			controls.target.set( 0, 0.5, 0 );
+			controls.update();
+			controls.minDistance = 8.4; // минимальное приближение камеры
+			controls.maxDistance = 16; // максимальное удаление камеры
+			controls.enablePan = false; // отключить правую кнопку мыши
+			controls.maxPolarAngle = Math.PI / 2;// не дает камере уйти под модельку
+			var environment = new RoomEnvironment();
+			var pmremGenerator = new THREE.PMREMGenerator( renderer );
+
+			// сцена ==================================
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color( 0xeeeeee );
+			scene.environment = pmremGenerator.fromScene( environment ).texture;
+			//scene.fog = new THREE.Fog( 0xEEEEEE, 5, 80 ); // туман
+			scene.castShadow = true;
+			scene.position.y = -1; // опустить сцену
+
+			// создание SpotLight и включение тени для света
+			scene.add( new THREE.AmbientLight( 0xffffff ) ); // цвет света
+			var light = new THREE.DirectionalLight( 0xdfebff, 1 );
+			light.position.set( 0, 2, 0 ); // позиция источника света
+			light.position.multiplyScalar( 0.9 );
+			light.intensity = 0.2; // интенсивность света
+			light.shadow.mapSize.width = 1024; // качество света
+			light.shadow.mapSize.height = 1024; // качество света
+
+			var d = 300;
+
+			light.shadow.camera.left = - d;
+			light.shadow.camera.right = d;
+			light.shadow.camera.top = d;
+			light.shadow.camera.bottom = - d;
+			light.shadow.camera.far = 1000;
+
+			scene.add( light );
+
+			//траектория источника света ==============
+			//var helper = new THREE.CameraHelper( light.shadow.camera );
+			//scene.add( helper );
+
+			// земля ==================================
+			var groundTexture = new THREE.TextureLoader().load( './asphalt-texture-2.jpg' );
+			groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+			groundTexture.repeat.set( 1, 1 );
+			groundTexture.anisotropy = 1;
+			groundTexture.encoding = THREE.sRGBEncoding;
+
+			var groundMaterial = new THREE.MeshLambertMaterial( { map: groundTexture } );
+
+			var mesh = new THREE.Mesh( new THREE.PlaneBufferGeometry( 60, 60 ), groundMaterial );
+			mesh.rotation.x = - Math.PI / 2;
+			mesh.receiveShadow = true;
+			scene.add( mesh );
+
+			// цилиндр - background ===================
+			var cylinderGeometry = new THREE.CylinderGeometry( 30, 30, 150, 700 );
+
+			var cylinderTexture = new THREE.TextureLoader().load( './abandoned_parking.jpg' );
+			cylinderTexture.wrapS = cylinderTexture.wrapT = THREE.RepeatWrapping;
+			cylinderTexture.repeat.set( 1, 1 );
+			cylinderTexture.anisotropy = 16;
+			cylinderTexture.encoding = THREE.sRGBEncoding;
+
+			var cylinderMaterial = new THREE.MeshLambertMaterial( { map: cylinderTexture } );
+			
+			var cylinder = new THREE.Mesh( cylinderGeometry, cylinderMaterial );
+			cylinderMaterial.side = 1;
+			cylinder.rotation.y = 9.8;
+			scene.add( cylinder );
+
+			// материалы (лобовое стекло, фары, боковые стенки контейнера)
+			var transparency_1 = 0.7;
+			var transparency_2 = 0.4;
+
+			var glassMaterial1 = new THREE.MeshPhysicalMaterial( {
+				color: 0x000000, metalness: 0, roughness: 0.1, transparency: transparency_1, transparent: true
+			} ); // лобовое стекло
+
+			var glassMaterial2 = new THREE.MeshPhysicalMaterial( {
+				color: 0x626262, metalness: 0.5, roughness: 0.1, transparency: transparency_2, transparent: true
+			} ); // фары
+
+			var containerMaterial = new THREE.MeshPhysicalMaterial( {
+				metalness: 0, roughness: 1, transparency: 1, transparent: true
+			} ); // прозрачный контейнер
+
+			var containerMaterialStock = new THREE.MeshPhysicalMaterial( {
+				metalness: 0, roughness: 1, transparency: 0, transparent: false
+			} ); // стандарнтый контейнер
+
+			// автомобиль =============================
+			var shadow = new THREE.TextureLoader().load( './car-shadow.png' ); // текстура тени
+
+			var dracoLoader = new DRACOLoader(); // загрузчик DRACO
+			dracoLoader.setDecoderPath( './js/libs/draco/gltf/' );
+
+			// использование RoughnessMipmapper необязательно
+			var roughnessMipmapper = new RoughnessMipmapper( renderer );
+
+			var loader = new GLTFLoader(); //загрузчик GLTF
+			loader.setDRACOLoader( dracoLoader );
+
+			loader.load( './kamaz__min__draco.glb', function ( gltf ) {
+				gltf.scene.traverse( function ( child ) {
+					if ( child.isMesh ) {
+						roughnessMipmapper.generateMipmaps( child.material );
+					}
+				} );
+	
+				var mesh  = gltf;
+				var model = gltf.scene;
+
+
+				model.getObjectByName( 'window_f' ).material = glassMaterial1; // лобовое стекло, замена материала на прозрачный
+				model.getObjectByName( 'window_s' ).material = glassMaterial1; // боковые стекла, замена материала на прозрачный
+				model.getObjectByName( 'headlamplamp_glass_white' ).material = glassMaterial2; // фары, замена материала на прозрачный
+				model.getObjectByName( 'fog_light_glass' ).material = glassMaterial2; // противотуманные фары, замена материала на прозрачный
+
+				model.traverse( function ( object ) {
+					/*if ( object.isMesh ) object.castShadow = true;*/ //отбрасывание тени
+				} );
+				model.traverse( function ( node ) {
+					if ( node.material && ( node.material.isMeshStandardMaterial || ( node.material.isShaderMaterial && node.material.envMap !== undefined ) ) ) {
+						node.material.envMap = envMap;
+						node.material.envMapIntensity = 1.5; //отражения
+					}
+				} );
+				model.traverse( function ( node ) {
+					if ( node.isMesh || node.isLight ) node.castShadow = true;
+				} );
+
+		
+
+
+
+				mixer = new THREE.AnimationMixer(model);
+				var clips = mesh.animations;
+				// action list
+				var move = [], clip, action;
+				for (var i = 1; i < 100; i ++) {
+					for (var j = 1; j < 100; j ++) {
+						clip = THREE.AnimationClip.findByName( clips, "Move__" + i + "--" + j );
+						if (clip) {
+							if (!move[i]) move[i] = [];
+							action = mixer.clipAction(clip);
+							action.setLoop(THREE.LoopOnce);
+							move[i][j] = {
+								clip: clip,
+								action: action
+							};
+						}
+					}
+				}
+
+		
+
+					// анимация шестеренки на кнопках
+					$('.control__item.part').on('click', function () {
+						let $this = $(this);
+						$this.addClass('active');
+						setTimeout(function() { 
+							$this.removeClass('active');
+						 }, 5000);
+					});
+
+					// выталкивающая плита
+					$('#move__1').on('click', function () {
+						var i = parseInt($(this).attr('id').substr(6), 10), action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.reset().setDuration(5).play();
+						}
+						model.getObjectByName( 'BUNKER_walls' ).material = containerMaterial;
+						setTimeout(function() { 
+							model.getObjectByName( 'BUNKER_walls' ).material = containerMaterialStock;
+						 }, 5000);
+						 	camera.position.set(7, 4, -7);
+					});
+
+					// задний борт
+					$('#move__2').on('click', function () {
+						var i = parseInt($(this).attr('id').substr(6), 10), action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.reset().setDuration(5).play();
+						}
+						camera.position.set(-6, 6, -7);
+					});
+
+					// прессование
+					$('#move__3').on('click', function () {
+						var i = parseInt($(this).attr('id').substr(6), 10), action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.reset().setDuration(5).play();
+						}
+						camera.position.set(-2, 3, -10);
+					});
+
+					// загрузчик
+					$('#move__4').on('click', function () {
+						var i = parseInt($(this).attr('id').substr(6), 10), action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.reset().setDuration(5).play();
+						}
+						camera.position.set(-3, 2, -10);
+					});
+
+					// аутригеры
+					$('#move__5').on('click', function () {
+						var i = parseInt($(this).attr('id').substr(6), 10), action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.reset().setDuration(5).play();
+						}
+						camera.position.set(-5, 2, -6);
+					});
+
+					// портал
+					$('#move__6').on('click', function () {
+						var i = parseInt($(this).attr('id').substr(6), 10), action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.reset().setDuration(5).play();
+						}
+						camera.position.set(4, 4, -10);
+					});
+
+					// вся анимация
+					$('#move__full').on('click', function () {
+						let $this = $(this);
+						$this.addClass('active');
+						setTimeout(function() { 
+							$this.removeClass('active');
+						}, 27500);
+
+						var i = 5, action;
+						for (var j = 1; j < move[i].length; j ++) {
+							action = move[i][j].action;
+							if (action) action.setDuration(5).play();
+							setTimeout(function() { 
+								action.paused = true;
+						 	}, 2500);
+							 setTimeout(function() { 
+								action.paused = false;
+						 	}, 25000);
+						}
+						setTimeout(function() { 
+							var i = 6, action;
+							for (var j = 1; j < move[i].length; j ++) {
+								action = move[i][j].action;
+								if (action) action.reset().setDuration(5).play();
+							}
+						}, 2500);
+						setTimeout(function() { 
+							var i = 4, action;
+							for (var j = 1; j < move[i].length; j ++) {
+								action = move[i][j].action;
+								if (action) action.reset().setDuration(5).play();
+							}
+						}, 7500);
+						setTimeout(function() { 
+							var i = 3, action;
+							for (var j = 1; j < move[i].length; j ++) {
+								action = move[i][j].action;
+								if (action) action.reset().setDuration(5).play();
+							}
+						}, 12500);
+						setTimeout(function() { 
+							var i = 1, action;
+							for (var j = 1; j < move[i].length; j ++) {
+								action = move[i][j].action;
+								if (action) action.reset().setDuration(5).play();
+							}
+							setTimeout(function() { 
+								model.getObjectByName( 'BUNKER_walls' ).material = containerMaterial;
+							}, 2500);
+							setTimeout(function() { 
+								model.getObjectByName( 'BUNKER_walls' ).material = containerMaterialStock;
+							}, 5000);
+						}, 17500);
+						setTimeout(function() { 
+							var i = 2, action;
+							for (var j = 1; j < move[i].length; j ++) {
+								action = move[i][j].action;
+								if (action) action.reset().setDuration(5).play();
+							}
+						}, 20000);
+					});
+
+
+				// тень автомобиля
+				mesh = new THREE.Mesh(
+					new THREE.PlaneBufferGeometry( 3, 11 ),
+					new THREE.MeshBasicMaterial( {
+						map: shadow, blending: THREE.MultiplyBlending, toneMapped: false, transparent: true
+					} )
+				);
+				mesh.position.y = - -0.02;
+				mesh.rotation.x = - Math.PI / 2;
+				mesh.renderOrder = 2;
+				model.add( mesh );
+		
+				scene.add( model );
+			} );
+
+		}
+	
+		function onWindowResize() {
+			camera.aspect = container.offsetWidth / container.offsetHeight;
+			camera.updateProjectionMatrix();
+
+				renderer.setSize( $('#container').width(), $('#container').height() );
+
+		}
+
+		function update () {
+			mixer.update( deltaSeconds );
+		}
+
+		function animate() {
+			controls.update();
+			requestAnimationFrame(animate);
+			var delta = clock.getDelta();
+			if (mixer) mixer.update(delta);
+			render();
+		}
+
+		function render() {
+			renderer.render( scene, camera );
+		}
+
+
+
+		init();
+		animate();
+		render();
+
+
+		
+	</script>
+
+</body>
+
+</html>
